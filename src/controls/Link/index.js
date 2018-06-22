@@ -147,14 +147,25 @@ class Link extends Component {
       anchorOffset: selection.get('anchorOffset') + linkTitle.length,
       focusOffset: selection.get('anchorOffset') + linkTitle.length,
     });
-    newEditorState = EditorState.acceptSelection(newEditorState, selection);
-    contentState = Modifier.insertText(
-      newEditorState.getCurrentContent(),
-      selection,
-      ' ',
-      newEditorState.getCurrentInlineStyle(),
-      undefined,
-    );
+    const currentContent = newEditorState.getCurrentContent();
+    const block = currentContent.getBlockForKey(selection.getStartKey());
+    const text = block.getText();
+    let index;
+    for (let i = 0; i < block.getLength(); i += 1) {
+      if (block.getCharacterList().get(i).getEntity() === entityKey) {
+        index = i + 1;
+      }
+    }
+    if (index === text.length || text[index] !== ' ') {
+      newEditorState = EditorState.acceptSelection(newEditorState, selection);
+      contentState = Modifier.insertText(
+        newEditorState.getCurrentContent(),
+        selection,
+        ' ',
+        newEditorState.getCurrentInlineStyle(),
+        undefined,
+      );
+    }
     onChange(EditorState.push(newEditorState, contentState, 'insert-characters'));
     this.doCollapse();
   };
