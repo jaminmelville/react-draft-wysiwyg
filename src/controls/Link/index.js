@@ -1,5 +1,3 @@
-/* @flow */
-
 import React, { Component } from 'react';
 import PropTypes from 'prop-types';
 import { RichUtils, EditorState, Modifier } from 'draft-js';
@@ -13,6 +11,13 @@ import linkifyIt from 'linkify-it';
 import LayoutComponent from './Component';
 
 const linkify = linkifyIt();
+const linkifyLink = params => {
+  const links = linkify.match(params.target);
+  return {
+    ...params,
+    target: (links && links[0] && links[0].url) || params.target,
+  };
+};
 
 class Link extends Component {
   static propTypes = {
@@ -23,114 +28,138 @@ class Link extends Component {
     translations: PropTypes.object,
   };
 
-  state: Object = {
-    expanded: false,
-    link: undefined,
-    selectionText: undefined,
-  };
-
-  componentWillMount(): void {
+  constructor(props) {
+    super(props);
     const { editorState, modalHandler } = this.props;
-    if (editorState) {
-      this.setState({
-        currentEntity: getSelectionEntity(editorState),
-      });
-    }
+    this.state = {
+      expanded: false,
+      link: undefined,
+      selectionText: undefined,
+      currentEntity: editorState ? getSelectionEntity(editorState) : undefined,
+    };
     modalHandler.registerCallBack(this.expandCollapse);
   }
 
-  componentWillReceiveProps(properties: Object): void {
-    const newState = {};
-    if (properties.editorState &&
-      this.props.editorState !== properties.editorState) {
-      newState.currentEntity = getSelectionEntity(properties.editorState);
+  componentDidUpdate(prevProps) {
+    const { editorState } = this.props;
+    if (editorState && editorState !== prevProps.editorState) {
+      this.setState({ currentEntity: getSelectionEntity(editorState) });
     }
-    this.setState(newState);
   }
 
-  componentWillUnmount(): void {
+  componentWillUnmount() {
     const { modalHandler } = this.props;
     modalHandler.deregisterCallBack(this.expandCollapse);
   }
 
-  onExpandEvent: Function = (): void => {
+  onExpandEvent = () => {
     this.signalExpanded = !this.state.expanded;
   };
 
   onChange = (action, title, target, targetOption) => {
+    const {
+      config: { linkCallback },
+    } = this.props;
+
     if (action === 'link') {
-      const links = linkify.match(target);
-      const linkifiedTarget = links && links[0] ? links[0].url : '';
-      this.addLink(title, linkifiedTarget, targetOption);
+      const linkifyCallback = linkCallback || linkifyLink;
+      const linkified = linkifyCallback({ title, target, targetOption });
+      this.addLink(linkified.title, linkified.target, linkified.targetOption);
     } else {
       this.removeLink();
     }
-  }
+  };
 
   getCurrentValues = () => {
     const { editorState } = this.props;
     const { currentEntity } = this.state;
     const contentState = editorState.getCurrentContent();
     const currentValues = {};
-    if (currentEntity && (contentState.getEntity(currentEntity).get('type') === 'LINK')) {
+    if (
+      currentEntity &&
+      contentState.getEntity(currentEntity).get('type') === 'LINK'
+    ) {
       currentValues.link = {};
-      const entityRange = currentEntity && getEntityRange(editorState, currentEntity);
-      currentValues.link.target = currentEntity && contentState.getEntity(currentEntity).get('data').url;
-      currentValues.link.targetOption = currentEntity && contentState.getEntity(currentEntity).get('data').targetOption;
-      currentValues.link.title = (entityRange && entityRange.text);
+      const entityRange =
+        currentEntity && getEntityRange(editorState, currentEntity);
+      currentValues.link.target =
+        currentEntity && contentState.getEntity(currentEntity).get('data').url;
+      currentValues.link.targetOption =
+        currentEntity &&
+        contentState.getEntity(currentEntity).get('data').targetOption;
+      currentValues.link.title = entityRange && entityRange.text;
     }
     currentValues.selectionText = getSelectionText(editorState);
     return currentValues;
-  }
+  };
 
-  doExpand: Function = (): void => {
+  doExpand = () => {
     this.setState({
       expanded: true,
     });
   };
 
-  expandCollapse: Function = (): void => {
+  expandCollapse = () => {
     this.setState({
       expanded: this.signalExpanded,
     });
     this.signalExpanded = false;
-  }
+  };
 
-  doCollapse: Function = (): void => {
+  doCollapse = () => {
     this.setState({
       expanded: false,
     });
   };
 
-  removeLink: Function = (): void => {
+  removeLink = () => {
     const { editorState, onChange } = this.props;
     const { currentEntity } = this.state;
     let selection = editorState.getSelection();
     if (currentEntity) {
       const entityRange = getEntityRange(editorState, currentEntity);
-      selection = selection.merge({
-        anchorOffset: entityRange.start,
-        focusOffset: entityRange.end,
-      });
+      const isBackward = selection.getIsBackward();
+      if (isBackward) {
+        selection = selection.merge({
+          anchorOffset: entityRange.end,
+          focusOffset: entityRange.start,
+        });
+      } else {
+        selection = selection.merge({
+          anchorOffset: entityRange.start,
+          focusOffset: entityRange.end,
+        });
+      }
       onChange(RichUtils.toggleLink(editorState, selection, null));
     }
   };
 
-  addLink: Function = (linkTitle, linkTarget, linkTargetOption): void => {
+  addLink = (linkTitle, linkTarget, linkTargetOption) => {
     const { editorState, onChange } = this.props;
     const { currentEntity } = this.state;
     let selection = editorState.getSelection();
 
     if (currentEntity) {
       const entityRange = getEntityRange(editorState, currentEntity);
-      selection = selection.merge({
-        anchorOffset: entityRange.start,
-        focusOffset: entityRange.end,
-      });
+      const isBackward = selection.getIsBackward();
+      if (isBackward) {
+        selection = selection.merge({
+          anchorOffset: entityRange.end,
+          focusOffset: entityRange.start,
+        });
+      } else {
+        selection = selection.merge({
+          anchorOffset: entityRange.start,
+          focusOffset: entityRange.end,
+        });
+      }
     }
     const entityKey = editorState
       .getCurrentContent()
-      .createEntity('LINK', 'MUTABLE', { url: linkTarget, targetOption: linkTargetOption })
+      .createEntity('LINK', 'MUTABLE', {
+        url: linkTarget,
+        targetOption: linkTargetOption,
+      })
       .getLastCreatedEntityKey();
 
     let contentState = Modifier.replaceText(
@@ -138,9 +167,13 @@ class Link extends Component {
       selection,
       `${linkTitle}`,
       editorState.getCurrentInlineStyle(),
-      entityKey,
+      entityKey
     );
-    let newEditorState = EditorState.push(editorState, contentState, 'insert-characters');
+    let newEditorState = EditorState.push(
+      editorState,
+      contentState,
+      'insert-characters'
+    );
 
     // insert a blank space after link
     selection = newEditorState.getSelection().merge({
@@ -163,14 +196,16 @@ class Link extends Component {
         selection,
         ' ',
         newEditorState.getCurrentInlineStyle(),
-        undefined,
+        undefined
       );
     }
-    onChange(EditorState.push(newEditorState, contentState, 'insert-characters'));
+    onChange(
+      EditorState.push(newEditorState, contentState, 'insert-characters')
+    );
     this.doCollapse();
   };
 
-  render(): Object {
+  render() {
     const { config, translations } = this.props;
     const { expanded } = this.state;
     const { link, selectionText } = this.getCurrentValues();
